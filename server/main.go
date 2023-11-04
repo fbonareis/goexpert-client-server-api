@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -81,6 +83,14 @@ func GetExchangeRate(ctx context.Context) (*ExchangeRateApiResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	select {
+	case <-ctx.Done():
+		log.Println("request canceled or context timed out")
+		return nil, errors.New("request canceled or context timed out")
+	default:
+	}
+
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -123,10 +133,20 @@ func DatabaseFactory() (*sql.DB, error) {
 func SaveExchangeRateInDatabase(ctx context.Context, db *sql.DB, exchangeRate *ExchangeRateApiResponse) error {
 	ctx, cancel := context.WithTimeout(ctx, exchangeRateDBTransactionTimeoutDuration)
 	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		log.Println("DB: request canceled or context timed out")
+		return errors.New("DB: request canceled or context timed out")
+	default:
+	}
+
 	stmt, err := db.PrepareContext(ctx, "INSERT INTO exchanges(code, codein, name, high, low, varBid, pctChange, bid, ask) values(?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return err
 	}
+
+	defer stmt.Close()
 	_, err = stmt.ExecContext(
 		ctx,
 		exchangeRate.USDBRL.Code,
